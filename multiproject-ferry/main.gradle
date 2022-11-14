@@ -16,6 +16,9 @@ task build {
 
 }
 
+if (project.hasProperty("currentTag")) {
+    version = project.currentTag.replace("v", "")
+}
 
 apply plugin: net.dumbcode.gradlehook.GradleWebhookPlugin
 
