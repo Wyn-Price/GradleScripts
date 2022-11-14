@@ -68,21 +68,6 @@ tasks.getByName("curseforge").doLast {
     curseforgeDownloadLink = "https://www.curseforge.com/minecraft/mc-mods/$project.curseforge_slug/files/$fileId";
 }
 
-String getBranch() {
-    def ENV = System.getenv()
-    if (ENV.GITHUB_REF) {
-        def branch = ENV.GITHUB_REF
-        return branch.substring(branch.lastIndexOf("/") + 1)
-    }
-
-    if (grgit == null) {
-        return "unknown"
-    }
-
-    def branch = grgit.branch.current().name
-    return branch.substring(branch.lastIndexOf("/") + 1)
-}
-
 import com.modrinth.minotaur.dependencies.ModDependency
 
 modrinth {

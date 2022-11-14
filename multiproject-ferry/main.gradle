@@ -160,6 +160,22 @@ task github {
     }
 }
 
+String getBranch() {
+    def ENV = System.getenv()
+    if (ENV.GITHUB_REF) {
+        def branch = ENV.GITHUB_REF
+        return branch.substring(branch.lastIndexOf("/") + 1)
+    }
+
+    if (grgit == null) {
+        return "unknown"
+    }
+
+    def branch = grgit.branch.current().name
+    return branch.substring(branch.lastIndexOf("/") + 1)
+}
+
+
 void sendDiscordWebhook() {
     println "GitHub download: $githubDownloadLink"
 
