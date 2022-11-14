@@ -1,0 +1,173 @@
+buildscript {
+    repositories {
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+
+    dependencies {
+        classpath "gradle.plugin.com.matthewprenger:CurseGradle:1.4.0"
+        classpath "org.ajoberstar.grgit:grgit-gradle:4.1.0"
+        classpath "com.modrinth.minotaur:Minotaur:2.1.2"
+    }
+}
+
+apply plugin: com.matthewprenger.cursegradle.CurseGradlePlugin
+apply plugin: org.ajoberstar.grgit.gradle.GrgitPlugin
+apply plugin: com.modrinth.minotaur.Minotaur
+apply plugin: 'maven-publish'
+
+version = getVersion()
+
+ext.curseforgeDownloadLink = null
+ext.modrinthDownloadLink = null
+
+task ferryLoader {
+    dependsOn "curseforge"
+    // dependsOn "modrinth"
+    dependsOn build
+}
+
+curseforge {
+    if (System.getenv().CURSEFORGE_TOKEN) {
+        apiKey = System.getenv().CURSEFORGE_TOKEN
+    } else {
+        println "No CURSEFORGE_TOKEN specified"
+    }
+    project {
+        id = project.curseforge_id
+        releaseType = project.changelog.curseReleaseType
+        project.curseforge_game_versions.split(", ").each {
+            String gameVersion -> addGameVersion gameVersion
+        }
+        changelog = project.changelog.releaseChangelog
+        mainArtifact(file("${project.buildDir}/libs/${archivesBaseName}-${version}.jar"))
+        mainArtifact.displayName = "$project.project_name v$version for $project.minecraft_version"
+        if (!project.curseforge_required_dependencies.isEmpty() || !project.curseforge_optional_dependencies.isEmpty()) {
+            relations {
+                if (!project.curseforge_required_dependencies.isEmpty()) {
+                    project.curseforge_required_dependencies.split(", ").each {
+                        String dep -> requiredDependency dep
+                    }
+                }
+                if (!project.curseforge_optional_dependencies.isEmpty()) {
+                    project.curseforge_optional_dependencies.split(", ").each {
+                        String dep -> optionalDependency dep
+                    }
+                }
+            }
+        }
+    }
+    options {
+        forgeGradleIntegration = false
+    }
+}
+
+tasks.getByName("curseforge").doLast {
+    def fileId = (tasks.getByName("curseforge$curseforge_id").property("mainArtifact"))['fileID']
+    curseforgeDownloadLink = "https://www.curseforge.com/minecraft/mc-mods/$project.curseforge_slug/files/$fileId";
+}
+
+String getBranch() {
+    def ENV = System.getenv()
+    if (ENV.GITHUB_REF) {
+        def branch = ENV.GITHUB_REF
+        return branch.substring(branch.lastIndexOf("/") + 1)
+    }
+
+    if (grgit == null) {
+        return "unknown"
+    }
+
+    def branch = grgit.branch.current().name
+    return branch.substring(branch.lastIndexOf("/") + 1)
+}
+
+import com.modrinth.minotaur.dependencies.ModDependency
+
+modrinth {
+    projectId = project.modrinth_id
+    versionName = "$project.project_name v$version for $project.minecraft_version ($project.loader_name)"
+    uploadFile = file("${project.buildDir}/libs/${archivesBaseName}-${version}.jar")
+    changelog = project.changelog.releaseChangelog
+    versionType = project.changelog.curseReleaseType
+    project.modrinth_game_versions.split(", ").each {
+        gameVersions.add it
+    }
+    project.modrinth_mod_loaders.split(", ").each {
+        loaders.add it
+    }
+    if (project.hasProperty("modrinth_required_dep_ids")) {
+        project.modrinth_required_dependencies.split(", ").each {
+            deps.add new ModDependency(it, "required")
+        }
+    }
+    if (project.hasProperty("modrinth_optional_dependencies")) {
+        project.modrinth_optional_dependencies.split(", ").each {
+            deps.add new ModDependency(it, "optional")
+        }
+    }
+    if (project.hasProperty("modrinth_incompatible_dependencies")) {
+        project.modrinth_incompatible_dependencies.split(", ").each {
+            deps.add new ModDependency(it, "incompatible")
+        }
+    }
+    if (project.hasProperty("modrinth_embedded_dependencies")) {
+        project.modrinth_embedded_dependencies.split(", ").each {
+            deps.add new ModDependency(it, "embedded")
+        }
+    }
+}
+
+tasks.modrinth.doLast {
+  if (tasks.modrinth.wasUploadSuccessful()) {
+    modrinthDownloadLink = "https://modrinth.com/mod/$project.modrinth_slug/version/$version"
+  }
+}
+
+String getVersion() {
+    def version = "unknown"
+    if (project.hasProperty("currentTag")) {
+        return project.currentTag.replace("v", "")
+    }
+    def branchLines = "git branch --show-current".execute().in.readLines()
+    if (!branchLines.isEmpty()) {
+        version = branchLines.get(0)
+    }
+
+    def tagLines = "git describe --tags --exact-match --abbrev=0".execute().in.readLines()
+    def release = false
+    if (!tagLines.isEmpty()) {
+        def line = tagLines.get(0)
+        def regex = /v([0-9].[0-9].[0-9])/
+        if (line.matches(regex)) {
+            version = (line =~ regex)[0][1] // gets 1st match group of 1st match
+            release = true
+        }
+    }
+    if (!release) {
+        def lastTag = "git describe --tags --abbrev=0".execute().in.readLines()
+        def lastCommit = "git rev-parse --short HEAD".execute().in.readLines()
+        if (!lastTag.isEmpty() && !lastCommit.isEmpty()) {
+            version = lastTag.get(0) + "+" + version + "." + lastCommit.get(0)
+        }
+    }
+    if(ext.loader) {
+        version += "+${ext.loader}"
+    }   
+    return version
+}
+
+ext.mod = { String localOverrideKey, Object dep ->
+    File file = file("../.${localOverrideKey}-local");
+    if (file.exists()) {
+        dependencies.implementation(dep)
+    } else {
+        dependencies.modImplementation(dep)
+    }
+}
+
+ext.includeMod = { String localOverrideKey, Object dep ->
+    mod(localOverrideKey, dep)
+    dependencies.include(dep)
+}

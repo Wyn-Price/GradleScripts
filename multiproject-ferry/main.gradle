@@ -1,0 +1,267 @@
+buildscript {
+    repositories {
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+
+    dependencies {
+        classpath "net.dumbcode.gradlehook:GradleHook:1.3.1"
+        classpath "org.kohsuke:github-api:1.114"
+    }
+}
+
+// GradleHook relies on a task called `build` existing
+task build {
+
+}
+
+
+apply plugin: net.dumbcode.gradlehook.GradleWebhookPlugin
+
+ext.githubDownloadLink = null
+
+if (!ext.has("loaderProjects")) {
+    println "Loader projects not defined, defaulting to ['Fabric', 'Forge']"
+    ext.loaderProjects = ['Fabric', 'Forge']
+}
+
+def changelog = generateChangelog()
+ext.changelog = changelog
+subprojects {
+    println "Adding changelog to project $project.name"
+    ext.changelog = changelog
+}
+
+
+ext.loaders = loaderProjects.collect { loader -> project(":$loader") }
+
+def generateChangelog() {
+    def releaseChangelog = "No Changelog Available"
+    def curseReleaseType = "release"
+    def stabilitySuffix = ""
+    def releaseType = project.default_release_type
+
+    def changes = StringBuilder.newInstance()
+    if (!project.hasProperty("lastTag") || !project.hasProperty("currentTag")) {
+        println "Missing lastTag or currentTag parameters, aborting changelog creation"
+        return [
+            releaseType: releaseType,
+            curseReleaseType: curseReleaseType,
+            stabilitySuffix: stabilitySuffix,
+            releaseChangelog: releaseChangelog
+        ]
+    }
+    def lastTag = project.getProperty("lastTag")
+    def currentTag = project.getProperty("currentTag")
+    def commits = "git log --max-count=$project.changelog_max_commit_search --pretty=format:\"%b\" $lastTag..$currentTag".execute()
+    println "Last version: $lastTag"
+    println "Current version: $currentTag"
+
+
+    if (currentTag.contains("-alpha")) {
+        releaseType = "alpha"
+        curseReleaseType = "alpha"
+        stabilitySuffix = " (Alpha)"
+    } else if (currentTag.contains("-beta")) {
+        releaseType = "beta"
+        curseReleaseType = "beta"
+        stabilitySuffix = " (Beta)"
+    } else if (currentTag.contains("-pre")) {
+        releaseType = "pre"
+        curseReleaseType = "beta"
+        stabilitySuffix = " (Pre-Release)"
+    } else if (currentTag.contains("-rc")) {
+        releaseType = "rc"
+        curseReleaseType = "beta"
+        stabilitySuffix = " (Release Candidate)"
+    } else if (!currentTag.contains("-")) {
+        releaseType = "stable"
+    }
+    println "Release type: $releaseType"
+
+    commits.in.eachLine { line -> // Loops over the lines the git log command returns
+        def processedLine = line.toString()
+        if (processedLine.startsWith("\"")) {
+            processedLine = processedLine.substring(1)
+        }
+        if (processedLine.endsWith("\"")) {
+            processedLine = processedLine.substring(0, processedLine.length() - 1)
+        }
+        println "Reading line: $processedLine"
+
+        if (processedLine.startsWith("- ")) {
+            println "Adding changelog line:"
+            println "  $processedLine"
+            if (changes.length() == 0) {
+                changes << processedLine
+            } else {
+                changes << "\n$processedLine"
+            }
+        }
+    }
+    commits.err.eachLine { line -> println line }
+    commits.waitFor()
+    println "Changelog:"
+    releaseChangelog = changes.toString()
+    if (releaseChangelog.isEmpty()) {
+        releaseChangelog = "No Changelog Available"
+    }
+    println releaseChangelog
+
+    return [
+        releaseType: releaseType,
+        curseReleaseType: curseReleaseType,
+        stabilitySuffix: stabilitySuffix,
+        releaseChangelog: releaseChangelog
+    ]
+}
+
+task ferryBuildAndUpload {
+    for (loader in loaders) {
+        dependsOn "${loader.name}:ferryLoader"
+    }
+}
+
+task github {
+    dependsOn ferryBuildAndUpload
+    
+    // onlyIf {
+    //     System.getenv().GITHUB_TOKEN
+    // }
+
+    doLast {
+        def artifacts = loaders.collect { project ->
+            def file = file("${project.buildDir}/libs/${project.archivesBaseName}-${project.version}.jar")
+            if (!file.exists()) {
+                throw new GradleException("File ${file} does not exist!")
+            }
+            return file
+        }
+
+        println artifacts
+        githubDownloadLink = "https://google.com";
+
+        // def github = org.kohsuke.github.GitHub.connectUsingOAuth(System.getenv().GITHUB_TOKEN as String)
+        // def repository = github.getRepository(System.getenv().GITHUB_REPOSITORY)
+
+        // def releaseBuilder = new org.kohsuke.github.GHReleaseBuilder(repository, project.getProperty("currentTag"))
+        // releaseBuilder.name("$project.project_name v$version for $project.minecraft_version")
+        // releaseBuilder.body(releaseChangelog)
+        // releaseBuilder.commitish(getBranch())
+        // if (releaseType != "stable") {
+        //     releaseBuilder.prerelease(true)
+        // }
+
+        // def ghRelease = releaseBuilder.create()
+
+        // for (artifact in artifacts) {
+        //     ghRelease.uploadAsset(artifact, "application/java-archive")
+        // }
+
+        // githubDownloadLink = ghRelease.getHtmlUrl()
+    }
+}
+
+void sendDiscordWebhook() {
+    println "GitHub download: $githubDownloadLink"
+
+    def release_url = null;
+    
+    def links = loaders.collect { project -> {
+        def links = [
+            loader: project.loader_name,
+            curseforgeDownloadLink: project.ext.has("curseforgeDownloadLink") ? project.ext.curseforgeDownloadLink : null,
+            modrinthDownloadLink: "https://google.com",//project.ext.has("modrinthDownloadLink") ? project.ext.modrinthDownloadLink : null,
+        ]
+        if (project.ext.has("ferry_use_as_default") && project.ext.ferry_use_as_default) {
+            release_url = links.modrinthDownloadLink
+        }
+        print "$project.name: Links: $links"
+        return links
+    } }
+    
+    if (links.every { it.curseforgeDownloadLink != null && it.modrinthDownloadLink != null } && githubDownloadLink != null) { //&& System.getenv().DISCORD_ANNOUNCEMENT_WEBHOOK
+        println "Preparing webhook"
+
+        def result = DiscordBuilder.createForm {
+            if (project.use_project_username.toBoolean()) {
+                avatar_url = project.project_logo
+                username = project.project_name
+            }
+            embed {
+                color = Integer.decode(project.project_color)
+                author {
+                    name = project.project_name + ext.changelog.stabilitySuffix
+                    url = project.project_url
+                }
+                thumbnail { url = project.project_logo }
+                title = "$project.project_name v$version for $project.minecraft_version Released"
+                if (release_url != null) {
+                    url = release_url
+                    field {
+                        name = "Changes:"
+                        value = createDiscordChangelog(release_url)
+                    }
+                }
+                links.collect { link -> 
+                    field {
+                        name = "Downloads ($link.loader):"
+                        value = "[$modrinth_emote Modrinth]($link.modrinthDownloadLink)\n[$curseforge_emote CurseForge]($link.curseforgeDownloadLink)\n[$github_emote GitHub]($githubDownloadLink)"
+                    }
+                }
+                footer {
+                    text = "A $project.loader_name Mod"
+                    icon_url = project.loader_icon
+                }
+            }
+        }
+        print "SENDING: $result"
+        result = result.send(System.getenv().DISCORD_ANNOUNCEMENT_WEBHOOK) 
+
+        println "Discord Webhook Response: " + result.responseCode
+    }
+}
+
+task ferryBuildAndUploadAll {
+    dependsOn ferryBuildAndUpload
+    dependsOn github
+}
+
+task sendDiscordWebhook {
+    doLast {
+        sendDiscordWebhook()
+    }
+}
+
+
+task ferry {
+    dependsOn ferryBuildAndUploadAll
+    dependsOn sendDiscordWebhook
+}
+
+
+// Truncates changelogs for the Discord Webhook
+ext.createDiscordChangelog = { fullChangelogUrl ->
+    def webhookChangelog = StringBuilder.newInstance()
+    def changelogLines = ext.changelog.releaseChangelog.split("\n")
+    def maxLines = Integer.decode(project.discord_webhook_changelog_line_limit)
+    if (changelogLines.length <= maxLines) {
+        return ext.changelog.releaseChangelog
+    } else {
+        def lines = 0
+        changelogLines.find { line ->
+            if (webhookChangelog.length() == 0) {
+                webhookChangelog << line
+            } else {
+                webhookChangelog << "\n$line"
+            }
+            lines++
+            if (lines >= maxLines) {
+                webhookChangelog << "\n(+ " + (changelogLines.length - lines) + " more) See [Full Changelog]($fullChangelogUrl)"
+                return true;
+            }
+        }
+    }
+    return webhookChangelog.toString()
+}
