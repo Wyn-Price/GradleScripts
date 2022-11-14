@@ -126,9 +126,9 @@ task ferryBuildAndUpload {
 task github {
     dependsOn ferryBuildAndUpload
     
-    // onlyIf {
-    //     System.getenv().GITHUB_TOKEN
-    // }
+    onlyIf {
+        System.getenv().GITHUB_TOKEN
+    }
 
     doLast {
         def artifacts = loaders.collect { project ->
@@ -139,27 +139,24 @@ task github {
             return file
         }
 
-        println artifacts
-        githubDownloadLink = "https://google.com";
+        def github = org.kohsuke.github.GitHub.connectUsingOAuth(System.getenv().GITHUB_TOKEN as String)
+        def repository = github.getRepository(System.getenv().GITHUB_REPOSITORY)
 
-        // def github = org.kohsuke.github.GitHub.connectUsingOAuth(System.getenv().GITHUB_TOKEN as String)
-        // def repository = github.getRepository(System.getenv().GITHUB_REPOSITORY)
+        def releaseBuilder = new org.kohsuke.github.GHReleaseBuilder(repository, project.getProperty("currentTag"))
+        releaseBuilder.name("$project.project_name v$version for $project.minecraft_version")
+        releaseBuilder.body(releaseChangelog)
+        releaseBuilder.commitish(getBranch())
+        if (releaseType != "stable") {
+            releaseBuilder.prerelease(true)
+        }
 
-        // def releaseBuilder = new org.kohsuke.github.GHReleaseBuilder(repository, project.getProperty("currentTag"))
-        // releaseBuilder.name("$project.project_name v$version for $project.minecraft_version")
-        // releaseBuilder.body(releaseChangelog)
-        // releaseBuilder.commitish(getBranch())
-        // if (releaseType != "stable") {
-        //     releaseBuilder.prerelease(true)
-        // }
+        def ghRelease = releaseBuilder.create()
 
-        // def ghRelease = releaseBuilder.create()
+        for (artifact in artifacts) {
+            ghRelease.uploadAsset(artifact, "application/java-archive")
+        }
 
-        // for (artifact in artifacts) {
-        //     ghRelease.uploadAsset(artifact, "application/java-archive")
-        // }
-
-        // githubDownloadLink = ghRelease.getHtmlUrl()
+        githubDownloadLink = ghRelease.getHtmlUrl()
     }
 }
 
@@ -170,18 +167,18 @@ void sendDiscordWebhook() {
     
     def links = loaders.collect { project -> {
         def links = [
-            loader: project.loader_name,
+            loader_name: project.loader_name,
             curseforgeDownloadLink: project.ext.has("curseforgeDownloadLink") ? project.ext.curseforgeDownloadLink : null,
             modrinthDownloadLink: "https://google.com",//project.ext.has("modrinthDownloadLink") ? project.ext.modrinthDownloadLink : null,
         ]
-        if (project.ext.has("ferry_use_as_default") && project.ext.ferry_use_as_default) {
+        if (project.hasProperty("loader_ferry_use_as_default") && project.loader_ferry_use_as_default) {
             release_url = links.modrinthDownloadLink
         }
         print "$project.name: Links: $links"
         return links
     } }
     
-    if (links.every { it.curseforgeDownloadLink != null && it.modrinthDownloadLink != null } && githubDownloadLink != null) { //&& System.getenv().DISCORD_ANNOUNCEMENT_WEBHOOK
+    if (links.every { it.curseforgeDownloadLink != null && it.modrinthDownloadLink != null } && githubDownloadLink != null && System.getenv().DISCORD_ANNOUNCEMENT_WEBHOOK) {
         println "Preparing webhook"
 
         def result = DiscordBuilder.createForm {
@@ -206,8 +203,9 @@ void sendDiscordWebhook() {
                 }
                 links.collect { link -> 
                     field {
-                        name = "Downloads ($link.loader):"
+                        name = "Downloads ($link.loader_name):"
                         value = "[$modrinth_emote Modrinth]($link.modrinthDownloadLink)\n[$curseforge_emote CurseForge]($link.curseforgeDownloadLink)\n[$github_emote GitHub]($githubDownloadLink)"
+                        inline = true
                     }
                 }
                 footer {
@@ -215,9 +213,7 @@ void sendDiscordWebhook() {
                     icon_url = project.loader_icon
                 }
             }
-        }
-        print "SENDING: $result"
-        result = result.send(System.getenv().DISCORD_ANNOUNCEMENT_WEBHOOK) 
+        }.send(System.getenv().DISCORD_ANNOUNCEMENT_WEBHOOK) 
 
         println "Discord Webhook Response: " + result.responseCode
     }

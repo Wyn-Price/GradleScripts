@@ -152,8 +152,8 @@ String getVersion() {
             version = lastTag.get(0) + "+" + version + "." + lastCommit.get(0)
         }
     }
-    if(ext.loader) {
-        version += "+${ext.loader}"
+    if(project.hasProperty("loader_id")) {
+        version += "+$project.loader_id"
     }   
     return version
 }
