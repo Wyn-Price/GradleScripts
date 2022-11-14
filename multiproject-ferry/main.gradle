@@ -219,21 +219,13 @@ void sendDiscordWebhook() {
     }
 }
 
-task ferryBuildAndUploadAll {
+
+task ferry {
     dependsOn ferryBuildAndUpload
     dependsOn github
-}
-
-task sendDiscordWebhook {
     doLast {
         sendDiscordWebhook()
     }
-}
-
-
-task ferry {
-    dependsOn ferryBuildAndUploadAll
-    dependsOn sendDiscordWebhook
 }
 
 
