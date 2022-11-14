@@ -24,7 +24,7 @@ ext.modrinthDownloadLink = null
 
 task ferryLoader {
     dependsOn "curseforge"
-    // dependsOn "modrinth"
+    dependsOn "modrinth"
     dependsOn build
 }
 
