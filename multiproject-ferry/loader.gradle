@@ -112,8 +112,14 @@ tasks.modrinth.doLast {
 
 String getVersion() {
     def version = "unknown"
+
+    def suffix = "";
+    if(project.hasProperty("loader_id")) {
+        suffix = "+$project.loader_id"
+    }   
+
     if (project.hasProperty("currentTag")) {
-        return project.currentTag.replace("v", "")
+        return project.currentTag.replace("v", "") + suffix
     }
     def branchLines = "git branch --show-current".execute().in.readLines()
     if (!branchLines.isEmpty()) {
@@ -137,10 +143,7 @@ String getVersion() {
             version = lastTag.get(0) + "+" + version + "." + lastCommit.get(0)
         }
     }
-    if(project.hasProperty("loader_id")) {
-        version += "+$project.loader_id"
-    }   
-    return version
+    return version + suffix
 }
 
 ext.mod = { String localOverrideKey, Object dep ->
