@@ -169,7 +169,7 @@ void sendDiscordWebhook() {
         def links = [
             loader_name: project.loader_name,
             curseforgeDownloadLink: project.ext.has("curseforgeDownloadLink") ? project.ext.curseforgeDownloadLink : null,
-            modrinthDownloadLink: "https://google.com",//project.ext.has("modrinthDownloadLink") ? project.ext.modrinthDownloadLink : null,
+            modrinthDownloadLink: project.ext.has("modrinthDownloadLink") ? project.ext.modrinthDownloadLink : null,
         ]
         if (project.hasProperty("loader_ferry_use_as_default") && project.loader_ferry_use_as_default) {
             release_url = links.modrinthDownloadLink
