@@ -171,7 +171,7 @@ void sendDiscordWebhook() {
             curseforgeDownloadLink: project.ext.has("curseforgeDownloadLink") ? project.ext.curseforgeDownloadLink : null,
             modrinthDownloadLink: project.ext.has("modrinthDownloadLink") ? project.ext.modrinthDownloadLink : null,
         ]
-        if (project.hasProperty("loader_ferry_use_as_default") && project.loader_ferry_use_as_default) {
+        if (project.hasProperty("use_loader_as_default") && project.use_loader_as_default) {
             release_url = links.modrinthDownloadLink
         }
         print "$project.name: Links: $links"
